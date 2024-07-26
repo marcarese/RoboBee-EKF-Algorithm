@@ -1,11 +1,7 @@
 #include <iostream>
 #include <fstream>
 #include <vector>
-
-//#define M_PI 3.14
-
-#include <C:/Users/mlarc/VSCodeProjects/CTestingProject/Robobee_EKF_Algorithm/Eigen/Dense>
-//#include <Eigen/Dense>
+#include <Eigen/Dense>
 
 using namespace std; 
 using namespace Eigen;
