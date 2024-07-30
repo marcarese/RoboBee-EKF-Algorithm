@@ -13,7 +13,9 @@ Eigen Map class -> https://eigen.tuxfamily.org/dox/group__TutorialMapClass.html
 .array() element access -> https://eigen.tuxfamily.org/dox/group__TutorialArrayClass.html
 
 ###----------------------------- Results and analytics -----------------------------###
+Proccessor: 48Mhz M0 Arm Cortex
 
 Memory used for entire program:                     539.96 Kilobytes
-Number of cycles used to analyze one datapoint:     1.0e8 -> 100 MegaCycles
+Number of cycles used to analyze one datapoint:     1.45e4 -> 14.5 Kilocycles
+Number of cycles used to analyze all datapoints:    1.73e7 -> 17.3 Megacycles
 
