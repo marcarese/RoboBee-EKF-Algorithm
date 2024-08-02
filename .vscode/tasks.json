@@ -1,0 +1,25 @@
+{
+  // ctrl + shift + P -> Tasks: Run Build Task
+  // Gives total time to compile program. 
+
+    "version": "2.0.0",
+    "tasks": [
+      {
+        "label": "buildtime",
+        "type": "shell",
+        "command": "powershell",
+        "args": [
+          "-Command",
+          "& { $time = Measure-Command { g++ -o RoboBeeMain RoboBeeMain.cpp }; Write-Output \"Elapsed time: $($time.TotalSeconds) seconds\" }"
+          //"& { $time = Measure-Command { g++ -o RoboBeeMain RoboBeeMain.cpp }; Write-Output \"Elapsed time: $($time.TotalMilliseconds) seconds\" }"
+        ],
+        "group": {
+          "kind": "build",
+          "isDefault": true
+        },
+        "problemMatcher": ["$gcc"],
+        "detail": "Measure compile time"
+      }
+    ]
+  }
+  
