@@ -1,63 +1,47 @@
 #include <iostream>
 #include <fstream>
 #include <vector>
+#include <chrono>
 #include <Eigen/Dense>
 
 using namespace std; 
 using namespace Eigen;
 
+int tableValues = 100;                                              // number of look up table values
 
-// -------------------------------- REFERENCES -------------------------------- //
-// EKF (Extended Kalman Filter) -> https://www.kalmanfilter.net/default.aspx
-// Eigen Handbook -> https://github.com/AIBluefisher/Eigen_Handbook/tree/master/EN
-// Basic how to use Eigen -> https://eigen.tuxfamily.org/dox/group__TutorialMatrixClass.html
-// Jacobian review -> https://www.youtube.com/playlist?list=PLEZWS2fT1672lJI7FT5OXHJU6cTgkSzV2
-// Eigen Matrix/Vector datatype nomenclature -> https://eigen.tuxfamily.org/dox/group__matrixtypedefs.html#ga9f54d6a47f5267f83c415ac54f5a89f3
-// Eigen block operations -> https://eigen.tuxfamily.org/dox/group__TutorialBlockOperations.html
-// Eigen Map class -> https://eigen.tuxfamily.org/dox/group__TutorialMapClass.html
-// .array() element access -> https://eigen.tuxfamily.org/dox/group__TutorialArrayClass.html
-
-const int TABLE_SIZE = 100;                                         // Number of entries in the sine and cosine lookup tables
-
-vector<float> sineTable(TABLE_SIZE);
-vector<float> cosineTable(TABLE_SIZE);
-                                                                  
-void initializeTables() {                                           // function to create a lookup table for sine and cosine
-    for (int i = 0; i < TABLE_SIZE; ++i) {
-        sineTable[i] = sin((i * (2 * M_PI) / TABLE_SIZE));          // only 100 values of sine will be used for this table
-        cosineTable[i] = cos((i * (2 * M_PI) / TABLE_SIZE));
+                                                                    // Function to calculate factorial
+float factorial(int n) {
+    if (n == 0 || n == 1) return 1;                                 // if n is not 1 or 0
+    float result = 1;
+    for (int i = 2; i <= n; ++i) {                                  // multiply number times itself n times
+        result *= i;
     }
-}// end InitializeSineTable()
+    return result;
+}
 
-float sinLU(float radian) { //Sine Look Up                          // get the sine value from the lookup table with interpolation
-    while (radian < 0) radian += (2 * M_PI);                        // make the radians positive
-    while (radian >= (2 * M_PI)) radian -= (2 * M_PI);              // make the radians fall within [0, 2Pi)
+                                                                    // Function to approximate sine using Taylor Series
+float sine_taylor(float x, int terms = 2) {
+                                                                    // sine_taylor(angle datapoint, taylor terms)
+    float result = 0.0;
+    for (int n = 0; n < terms; ++n) {                               // create a new taylor term up to specified # terms
+        float term = pow(-1, n) * pow(x, 2 * n + 1) / factorial(2 * n + 1);
+        result += term;                                             // add all terms for approxomation
+    }
+    return result;
+}
 
-    float index = radian * TABLE_SIZE / (2 * M_PI);                 // Scale the angle to the table size
-    int index1 = static_cast<int>(index);                           // Lower index for interpolation
-    int index2 = (index1 + 1) % TABLE_SIZE;                         // Upper index for interpolation, wrap around if necessary
+// Function to create a lookup table for sine values
+vector<float> create_sine_lookup_table(int tableValues, float maxAngle) {
+    vector<float> sine_table(tableValues);
+    float step = maxAngle / (tableValues - 1);
+    for (int i = 0; i < tableValues; ++i) {
+        float angle = i * step;
+        sine_table[i] = sine_taylor(angle);
+    }
+    return sine_table;
+}
 
-    float fraction = index - index1;                                // factional part for interpolation
-
-                                                                    // linear interpolation
-    float sineValue = (1 - fraction) * sineTable[index1] + fraction * sineTable[index2];
-    return sineValue;
-}// end sinLU()
-
-float cosLU(float radian) { //Cosine Look Up                        // get the cosine value from the lookup table with interpolation
-    while (radian < 0) radian += (2 * M_PI);                        // make the radians positive
-    while (radian >= (2 * M_PI)) radian -= (2 * M_PI);              // make the radians fall within [0, 2Pi)
-
-    float index = radian * TABLE_SIZE / (2 * M_PI);                 // Scale the angle to the table size
-    int index1 = static_cast<int>(index);                           // Lower index for interpolation
-    int index2 = (index1 + 1) % TABLE_SIZE;                         // Upper index for interpolation, wrap around if necessary
-
-    float fraction = index - index1;                                // factional part for interpolation
-
-                                                                    // linear interpolation
-    float cosineValue = (1 - fraction) * cosineTable[index1] + fraction * cosineTable[index2];
-    return cosineValue;
-}// end cosLU()
+vector<float>sinLU = create_sine_lookup_table(tableValues, 2 * M_PI);
 
 class RobobeeEKF{
             // The RobobeeEKF class holds the information that is relevent for calculations moving RoboBee from point A to point B. 
@@ -127,27 +111,27 @@ class RobobeeEKF{
             Vector<float, 10> xDot;                                 // 10x1 column vector to hold information
                                                                     // about future vel, accel, etc data
 
-            float linVel    = linVelX*cosLU(psi)*cosLU(theta) +     // total linear velocity
-                                linVelY*cosLU(theta)*sinLU(psi) - 
-                                linVelZ*sinLU(theta);
+            float linVel    = linVelX*cos(psi)*cos(theta) +     // total linear velocity
+                                linVelY*cos(theta)*sinLU[psi] - 
+                                linVelZ*sinLU[theta];
             
                                                                     // total angular velocity
-            float angVel    = angVelRol*(cosLU(psi)*sinLU(theta)*sinLU(psi) - sinLU(psi)*cosLU(phi)) +
-                                angVelPit*(sinLU(psi)*sinLU(theta)*sinLU(psi) - cosLU(psi)*cosLU(phi)) + 
-                                angVelYaw*(cosLU(theta)*sinLU(phi));
+            float angVel    = angVelRol*(cos(psi)*sinLU[theta]*sinLU[psi] - sinLU[psi]*cos(phi)) +
+                                angVelPit*(sinLU[psi]*sinLU[theta]*sinLU[psi] - cos(psi)*cos(phi)) + 
+                                angVelYaw*(cos(theta)*sinLU[phi]);
 
             float forceFunc = -drag*(cmDist*angVel + linVel);       // force of drag
             float torqFunc  = -cmDist*forceFunc;                    // torque of drag
 
                                                                     // total force from the world perspective
-            Vector3f totalWorldForce(cosLU(psi)*cosLU(theta)*forceFunc + (cosLU(psi)*sinLU(theta)*cosLU(phi) + sinLU(psi)*sinLU(phi))*force, 
-                                    sinLU(psi)*cosLU(theta)*forceFunc + (sinLU(psi)*sinLU(theta)*cosLU(phi) - cosLU(psi)*sinLU(phi))*force, 
-                                    -sinLU(theta)*forceFunc + cosLU(theta)*cosLU(phi)*force - m*g);
+            Vector3f totalWorldForce(cos(psi)*cos(theta)*forceFunc + (cos(psi)*sinLU[theta]*cos(phi) + sinLU[psi]*sinLU[phi])*force, 
+                                    sinLU[psi]*cos(theta)*forceFunc + (sinLU[psi]*sinLU[theta]*cos(phi) - cos(psi)*sinLU[phi])*force, 
+                                    -sinLU[theta]*forceFunc + cos(theta)*cos(phi)*force - m*g);
 
                                                                     // total torque from the world perspective
-            Vector3f totalWorldTorq(cosLU(psi)*cosLU(theta)*torqX + (cosLU(psi)*sinLU(theta)*sinLU(phi) - sinLU(psi)*cosLU(phi))*(torqY + torqFunc) + (cosLU(psi)*sinLU(theta)*cosLU(phi) + sinLU(psi)*sinLU(phi))*torqZ,
-                                    sinLU(psi)*cosLU(theta)*torqX + (sinLU(psi)*sinLU(theta)*sinLU(phi) - cosLU(psi)*cosLU(phi))*(torqY + torqFunc) + (sinLU(psi)*sinLU(theta)*cosLU(phi) - cosLU(psi)*sinLU(phi))*torqZ,
-                                    -sinLU(theta)*torqX + (cosLU(theta)*sinLU(phi))*(torqY + torqFunc) + cosLU(theta)*cosLU(phi)*torqZ);
+            Vector3f totalWorldTorq(cos(psi)*cos(theta)*torqX + (cos(psi)*sinLU[theta]*sinLU[phi] - sinLU[psi]*cos(phi))*(torqY + torqFunc) + (cos(psi)*sinLU[theta]*cos(phi) + sinLU[psi]*sinLU[phi])*torqZ,
+                                    sinLU[psi]*cos(theta)*torqX + (sinLU[psi]*sinLU[theta]*sinLU[phi] - cos(psi)*cos(phi))*(torqY + torqFunc) + (sinLU[psi]*sinLU[theta]*cos(phi) - cos(psi)*sinLU[phi])*torqZ,
+                                    -sinLU[theta]*torqX + (cos(theta)*sinLU[phi])*(torqY + torqFunc) + cos(theta)*cos(phi)*torqZ);
             
             xDot(0)         = angVelRol;
             xDot(1)         = angVelPit;
@@ -194,13 +178,13 @@ class RobobeeEKF{
             float torqZ     = U(2);                                 // torque in the z direction
             float force     = U(3);                                 // force of thrust
 
-            float linVel    = linVelX*cosLU(psi)*cosLU(theta) +     // linear velocity vector (v hat)
-                              linVelY*cosLU(theta)*sinLU(psi) -
-                              linVelZ*sinLU(theta);
+            float linVel    = linVelX*cos(psi)*cos(theta) +     // linear velocity vector (v hat)
+                              linVelY*cos(theta)*sinLU[psi] -
+                              linVelZ*sinLU[theta];
                                                                     // angular velocity vector (omega hat)
-            float angVel    = angVelRol*(cosLU(psi)*sinLU(theta)*sinLU(psi) - sinLU(psi)*cosLU(phi)) +
-                              angVelPit*(sinLU(psi)*sinLU(theta)*sinLU(psi) - cosLU(psi)*cosLU(phi)) + 
-                              angVelYaw*(cosLU(theta)*sinLU(phi));
+            float angVel    = angVelRol*(cos(psi)*sinLU[theta]*sinLU[psi] - sinLU[psi]*cos(phi)) +
+                              angVelPit*(sinLU[psi]*sinLU[theta]*sinLU[psi] - cos(psi)*cos(phi)) + 
+                              angVelYaw*(cos(theta)*sinLU[phi]);
 
             float forceFunc = -drag*(cmDist*angVel + linVel);       // force of drag
             float torqFunc  = -cmDist*forceFunc;                    // torque of drag
@@ -210,17 +194,17 @@ class RobobeeEKF{
             float dfd_dw    = -drag*cmDist;
             float dfd_dv    = -drag;
 
-            float dv_dvx    = cosLU(psi)*cosLU(theta);
-            float dv_dvy    = cosLU(theta)*sinLU(psi);
-            float dv_dvz    = -sinLU(theta);
-            float dv_dtheta = -linVelX*cosLU(psi)*sinLU(theta) - linVelY*sinLU(theta)*sinLU(psi) - linVelZ*cosLU(theta);
-            float dv_dpsi   = -linVelX*sinLU(psi)*cosLU(theta) + linVelY*cosLU(psi)*cosLU(theta);
+            float dv_dvx    = cos(psi)*cos(theta);
+            float dv_dvy    = cos(theta)*sinLU[psi];
+            float dv_dvz    = -sinLU[theta];
+            float dv_dtheta = -linVelX*cos(psi)*sinLU[theta] - linVelY*sinLU[theta]*sinLU[psi] - linVelZ*cos(theta);
+            float dv_dpsi   = -linVelX*sinLU[psi]*cos(theta) + linVelY*cos(psi)*cos(theta);
 
-            float dw_dp     = (cosLU(psi)*sinLU(theta)*sinLU(phi) - sinLU(psi)*cosLU(phi));
-            float dw_dq     = (sinLU(psi)*sinLU(theta)*sinLU(phi) - cosLU(psi)*cosLU(phi));
-            float dw_dr     = cosLU(theta)*sinLU(phi);
-            float dw_dtheta = angVelRol*(cosLU(psi)*cosLU(theta)*sinLU(phi)) + angVelPit*(sinLU(psi)*cosLU(theta)*sinLU(phi)) - angVelYaw*sinLU(theta)*sinLU(phi);
-            float dw_dpsi   = angVelRol*(-sinLU(psi)*sinLU(theta)*sinLU(phi) - cosLU(psi)*cosLU(phi)) + angVelPit*(cosLU(psi)*sinLU(theta)*sinLU(phi) + sinLU(psi)*cosLU(phi));
+            float dw_dp     = (cos(psi)*sinLU[theta]*sinLU[phi] - sinLU[psi]*cos(phi));
+            float dw_dq     = (sinLU[psi]*sinLU[theta]*sinLU[phi] - cos(psi)*cos(phi));
+            float dw_dr     = cos(theta)*sinLU[phi];
+            float dw_dtheta = angVelRol*(cos(psi)*cos(theta)*sinLU[phi]) + angVelPit*(sinLU[psi]*cos(theta)*sinLU[phi]) - angVelYaw*sinLU[theta]*sinLU[phi];
+            float dw_dpsi   = angVelRol*(-sinLU[psi]*sinLU[theta]*sinLU[phi] - cos(psi)*cos(phi)) + angVelPit*(cos(psi)*sinLU[theta]*sinLU[phi] + sinLU[psi]*cos(phi));
 
                                                                     // create a 10x10 matrix and fill it with zeros
             Matrix<float, 10, 10> A = Matrix<float, 10, 10>::Zero(10, 10); 
@@ -229,72 +213,72 @@ class RobobeeEKF{
             A(1, 4) = 1;
             A(2, 5) = 1;
 
-            A(3, 0) = (1/inertiaX)*((torqY + torqFunc)*(cosLU(psi)*sinLU(theta)*cosLU(phi) + sinLU(psi)*sinLU(phi)) + torqZ*(cosLU(psi)*sinLU(theta)*cosLU(phi) + sinLU(psi)*sinLU(phi)));
-            A(3, 1) = (1/inertiaX)*(-torqX*(cosLU(psi)*sinLU(theta)) + (cosLU(psi)*sinLU(theta)*sinLU(phi) - sinLU(psi)*cosLU(phi))*(dtd_dfd*(dfd_dw*dw_dtheta + dfd_dv*dv_dtheta)) + (torqY + torqFunc)*(cosLU(psi)*cosLU(theta)*sinLU(phi)) + (cosLU(psi)*cosLU(theta)*cosLU(phi))*torqZ);
-            A(3, 2) = (1/inertiaX)*(-sinLU(psi)*cosLU(theta)*torqX + (-sinLU(psi)*sinLU(theta)*sinLU(phi) - cosLU(psi)*cosLU(phi))*(torqY + torqFunc) + (cosLU(psi)*sinLU(theta)*sinLU(phi) - sinLU(psi)*cosLU(phi))*(dtd_dfd*(dfd_dw*dw_dpsi + dfd_dv*dv_dpsi)) + (-sinLU(psi)*sinLU(theta)*cosLU(phi) + cosLU(psi)*sinLU(phi))*torqZ);
-            A(3, 3) = (1/inertiaX)*((cosLU(psi)*sinLU(theta)*sinLU(phi) - sinLU(psi)*cosLU(phi))*dtd_dfd*dfd_dw*dw_dp);
-            A(3, 4) = (1/inertiaX)*((cosLU(psi)*sinLU(theta)*sinLU(phi) - sinLU(psi)*cosLU(phi))*dtd_dfd*dfd_dw*dw_dq);
-            A(3, 5) = (1/inertiaX)*((cosLU(psi)*sinLU(theta)*sinLU(phi) - sinLU(psi)*cosLU(phi))*dtd_dfd*dfd_dw*dw_dr);
+            A(3, 0) = (1/inertiaX)*((torqY + torqFunc)*(cos(psi)*sinLU[theta]*cos(phi) + sinLU[psi]*sinLU[phi]) + torqZ*(cos(psi)*sinLU[theta]*cos(phi) + sinLU[psi]*sinLU[phi]));
+            A(3, 1) = (1/inertiaX)*(-torqX*(cos(psi)*sinLU[theta]) + (cos(psi)*sinLU[theta]*sinLU[phi] - sinLU[psi]*cos(phi))*(dtd_dfd*(dfd_dw*dw_dtheta + dfd_dv*dv_dtheta)) + (torqY + torqFunc)*(cos(psi)*cos(theta)*sinLU[phi]) + (cos(psi)*cos(theta)*cos(phi))*torqZ);
+            A(3, 2) = (1/inertiaX)*(-sinLU[psi]*cos(theta)*torqX + (-sinLU[psi]*sinLU[theta]*sinLU[phi] - cos(psi)*cos(phi))*(torqY + torqFunc) + (cos(psi)*sinLU[theta]*sinLU[phi] - sinLU[psi]*cos(phi))*(dtd_dfd*(dfd_dw*dw_dpsi + dfd_dv*dv_dpsi)) + (-sinLU[psi]*sinLU[theta]*cos(phi) + cos(psi)*sinLU[phi])*torqZ);
+            A(3, 3) = (1/inertiaX)*((cos(psi)*sinLU[theta]*sinLU[phi] - sinLU[psi]*cos(phi))*dtd_dfd*dfd_dw*dw_dp);
+            A(3, 4) = (1/inertiaX)*((cos(psi)*sinLU[theta]*sinLU[phi] - sinLU[psi]*cos(phi))*dtd_dfd*dfd_dw*dw_dq);
+            A(3, 5) = (1/inertiaX)*((cos(psi)*sinLU[theta]*sinLU[phi] - sinLU[psi]*cos(phi))*dtd_dfd*dfd_dw*dw_dr);
 
-            A(3, 7) = (1/inertiaX)*((cosLU(psi)*sinLU(theta)*sinLU(phi) - sinLU(psi)*cosLU(phi))*dtd_dfd*dfd_dv*dv_dvx);
-            A(3, 8) = (1/inertiaX)*((cosLU(psi)*sinLU(theta)*sinLU(phi) - sinLU(psi)*cosLU(phi))*dtd_dfd*dfd_dv*dv_dvy);
-            A(3, 9) = (1/inertiaX)*((cosLU(psi)*sinLU(theta)*sinLU(phi) - sinLU(psi)*cosLU(phi))*dtd_dfd*dfd_dv*dv_dvz);
+            A(3, 7) = (1/inertiaX)*((cos(psi)*sinLU[theta]*sinLU[phi] - sinLU[psi]*cos(phi))*dtd_dfd*dfd_dv*dv_dvx);
+            A(3, 8) = (1/inertiaX)*((cos(psi)*sinLU[theta]*sinLU[phi] - sinLU[psi]*cos(phi))*dtd_dfd*dfd_dv*dv_dvy);
+            A(3, 9) = (1/inertiaX)*((cos(psi)*sinLU[theta]*sinLU[phi] - sinLU[psi]*cos(phi))*dtd_dfd*dfd_dv*dv_dvz);
             
-            A(4, 0) = (1/inertiaY)*((torqY + torqFunc)*(-sinLU(psi)*sinLU(theta)*cosLU(phi) - cosLU(psi)*sinLU(phi)) + torqZ*(-sinLU(psi)*sinLU(theta)*sinLU(phi) - cosLU(psi)*cosLU(phi)));
-            A(4, 1) = (1/inertiaY)*(sinLU(psi)*-sinLU(theta)*torqX + (sinLU(psi)*sinLU(theta)*sinLU(phi) - cosLU(psi)*cosLU(phi))*(dtd_dfd*(dfd_dw*dw_dtheta + dfd_dv*dv_dtheta)) + (torqY + torqFunc)*(sinLU(psi)*cosLU(theta)*sinLU(phi)) + (sinLU(psi)*cosLU(theta)*cosLU(phi))*torqZ);
-            A(4, 2) = (1/inertiaY)*(cosLU(psi)*cosLU(theta)*torqX + (cosLU(psi)*sinLU(theta)*sinLU(phi) + sinLU(psi)*cosLU(phi))*(torqY + torqFunc) + (sinLU(psi)*sinLU(theta)*sinLU(phi) - cosLU(psi)*cosLU(phi))*(dtd_dfd*(dfd_dw*dw_dpsi + dfd_dv*dv_dpsi)) + (-cosLU(psi)*sinLU(theta)*cosLU(phi) - sinLU(psi)*sinLU(phi))*torqZ);
-            A(4, 3) = (1/inertiaY)*((sinLU(psi)*sinLU(theta)*sinLU(phi) - cosLU(psi)*cosLU(phi))*dtd_dfd*dfd_dw*dw_dp);
-            A(4, 4) = (1/inertiaY)*((sinLU(psi)*sinLU(theta)*sinLU(phi) - cosLU(psi)*cosLU(phi))*dtd_dfd*dfd_dw*dw_dq);
-            A(4, 5) = (1/inertiaY)*((sinLU(psi)*sinLU(theta)*sinLU(phi) - cosLU(psi)*cosLU(phi))*dtd_dfd*dfd_dw*dw_dr);
+            A(4, 0) = (1/inertiaY)*((torqY + torqFunc)*(-sinLU[psi]*sinLU[theta]*cos(phi) - cos(psi)*sinLU[phi]) + torqZ*(-sinLU[psi]*sinLU[theta]*sinLU[phi] - cos(psi)*cos(phi)));
+            A(4, 1) = (1/inertiaY)*(sinLU[psi]*-sinLU[theta]*torqX + (sinLU[psi]*sinLU[theta]*sinLU[phi] - cos(psi)*cos(phi))*(dtd_dfd*(dfd_dw*dw_dtheta + dfd_dv*dv_dtheta)) + (torqY + torqFunc)*(sinLU[psi]*cos(theta)*sinLU[phi]) + (sinLU[psi]*cos(theta)*cos(phi))*torqZ);
+            A(4, 2) = (1/inertiaY)*(cos(psi)*cos(theta)*torqX + (cos(psi)*sinLU[theta]*sinLU[phi] + sinLU[psi]*cos(phi))*(torqY + torqFunc) + (sinLU[psi]*sinLU[theta]*sinLU[phi] - cos(psi)*cos(phi))*(dtd_dfd*(dfd_dw*dw_dpsi + dfd_dv*dv_dpsi)) + (-cos(psi)*sinLU[theta]*cos(phi) - sinLU[psi]*sinLU[phi])*torqZ);
+            A(4, 3) = (1/inertiaY)*((sinLU[psi]*sinLU[theta]*sinLU[phi] - cos(psi)*cos(phi))*dtd_dfd*dfd_dw*dw_dp);
+            A(4, 4) = (1/inertiaY)*((sinLU[psi]*sinLU[theta]*sinLU[phi] - cos(psi)*cos(phi))*dtd_dfd*dfd_dw*dw_dq);
+            A(4, 5) = (1/inertiaY)*((sinLU[psi]*sinLU[theta]*sinLU[phi] - cos(psi)*cos(phi))*dtd_dfd*dfd_dw*dw_dr);
 
-            A(4, 7) = (1/inertiaY)*((sinLU(psi)*sinLU(theta)*sinLU(phi) - cosLU(psi)*cosLU(phi))*dtd_dfd*dfd_dv*dv_dvx);
-            A(4, 8) = (1/inertiaY)*((sinLU(psi)*sinLU(theta)*sinLU(phi) - cosLU(psi)*cosLU(phi))*dtd_dfd*dfd_dv*dv_dvy);
-            A(4, 9) = (1/inertiaY)*((sinLU(psi)*sinLU(theta)*sinLU(phi) - cosLU(psi)*cosLU(phi))*dtd_dfd*dfd_dv*dv_dvz);
+            A(4, 7) = (1/inertiaY)*((sinLU[psi]*sinLU[theta]*sinLU[phi] - cos(psi)*cos(phi))*dtd_dfd*dfd_dv*dv_dvx);
+            A(4, 8) = (1/inertiaY)*((sinLU[psi]*sinLU[theta]*sinLU[phi] - cos(psi)*cos(phi))*dtd_dfd*dfd_dv*dv_dvy);
+            A(4, 9) = (1/inertiaY)*((sinLU[psi]*sinLU[theta]*sinLU[phi] - cos(psi)*cos(phi))*dtd_dfd*dfd_dv*dv_dvz);
 
-            A(5, 0) = (1/inertiaZ)*((cosLU(theta)*cosLU(phi))*(torqY + torqFunc) - cosLU(theta)*sinLU(phi)*torqZ);
-            A(5, 1) = (1/inertiaZ)*(-cosLU(theta)*torqX + (sinLU(theta)*sinLU(phi))*(torqY + torqFunc) + (cosLU(theta)*sinLU(phi))*(dtd_dfd*(dfd_dw*dw_dtheta + dfd_dv*dv_dtheta)) - sinLU(theta)*cosLU(phi)*torqZ);
-            A(5, 3) = (1/inertiaZ)*((cosLU(theta)*sinLU(phi))*dtd_dfd*dfd_dw*dw_dp);
-            A(5, 4) = (1/inertiaZ)*((cosLU(theta)*sinLU(phi))*dtd_dfd*dfd_dw*dw_dq);
-            A(5, 5) = (1/inertiaZ)*((cosLU(theta)*sinLU(phi))*dtd_dfd*dfd_dw*dw_dr);
+            A(5, 0) = (1/inertiaZ)*((cos(theta)*cos(phi))*(torqY + torqFunc) - cos(theta)*sinLU[phi]*torqZ);
+            A(5, 1) = (1/inertiaZ)*(-cos(theta)*torqX + (sinLU[theta]*sinLU[phi])*(torqY + torqFunc) + (cos(theta)*sinLU[phi])*(dtd_dfd*(dfd_dw*dw_dtheta + dfd_dv*dv_dtheta)) - sinLU[theta]*cos(phi)*torqZ);
+            A(5, 3) = (1/inertiaZ)*((cos(theta)*sinLU[phi])*dtd_dfd*dfd_dw*dw_dp);
+            A(5, 4) = (1/inertiaZ)*((cos(theta)*sinLU[phi])*dtd_dfd*dfd_dw*dw_dq);
+            A(5, 5) = (1/inertiaZ)*((cos(theta)*sinLU[phi])*dtd_dfd*dfd_dw*dw_dr);
 
-            A(5, 7) = (1/inertiaZ)*((cosLU(theta)*sinLU(phi))*dtd_dfd*dfd_dv*dv_dvx);
-            A(5, 8) = (1/inertiaZ)*((cosLU(theta)*sinLU(phi))*dtd_dfd*dfd_dv*dv_dvy);
-            A(5, 9) = (1/inertiaZ)*((cosLU(theta)*sinLU(phi))*dtd_dfd*dfd_dv*dv_dvz);
+            A(5, 7) = (1/inertiaZ)*((cos(theta)*sinLU[phi])*dtd_dfd*dfd_dv*dv_dvx);
+            A(5, 8) = (1/inertiaZ)*((cos(theta)*sinLU[phi])*dtd_dfd*dfd_dv*dv_dvy);
+            A(5, 9) = (1/inertiaZ)*((cos(theta)*sinLU[phi])*dtd_dfd*dfd_dv*dv_dvz);
 
             A(6, 9) = 1;
 
-            A(7, 0) = (1/m)*((cosLU(psi)*sinLU(theta)*-sinLU(phi) + sinLU(psi)*cosLU(phi))*force);
-            A(7, 1) = (1/m)*(cosLU(psi)*-sinLU(theta)*forceFunc + cosLU(psi)*cosLU(theta)*(dfd_dv*dv_dtheta + dfd_dw*dw_dtheta) + (cosLU(psi)*cosLU(theta)*cosLU(phi))*force);
-            A(7, 2) = (1/m)*(-sinLU(psi)*cosLU(theta)*forceFunc + cosLU(psi)*cosLU(theta)*(dfd_dv*dv_dpsi + dfd_dw*dw_dpsi) + (-sinLU(psi)*sinLU(theta)*cosLU(phi) + cosLU(psi)*sinLU(phi))*force);
-            A(7, 3) = (1/m)*cosLU(psi)*cosLU(theta)*dfd_dw*dw_dp;
-            A(7, 4) = (1/m)*cosLU(psi)*cosLU(theta)*dfd_dw*dw_dq;
-            A(7, 5) = (1/m)*cosLU(psi)*cosLU(theta)*dfd_dw*dw_dr;
+            A(7, 0) = (1/m)*((cos(psi)*sinLU[theta]*-sinLU[phi] + sinLU[psi]*cos(phi))*force);
+            A(7, 1) = (1/m)*(cos(psi)*-sinLU[theta]*forceFunc + cos(psi)*cos(theta)*(dfd_dv*dv_dtheta + dfd_dw*dw_dtheta) + (cos(psi)*cos(theta)*cos(phi))*force);
+            A(7, 2) = (1/m)*(-sinLU[psi]*cos(theta)*forceFunc + cos(psi)*cos(theta)*(dfd_dv*dv_dpsi + dfd_dw*dw_dpsi) + (-sinLU[psi]*sinLU[theta]*cos(phi) + cos(psi)*sinLU[phi])*force);
+            A(7, 3) = (1/m)*cos(psi)*cos(theta)*dfd_dw*dw_dp;
+            A(7, 4) = (1/m)*cos(psi)*cos(theta)*dfd_dw*dw_dq;
+            A(7, 5) = (1/m)*cos(psi)*cos(theta)*dfd_dw*dw_dr;
 
-            A(7, 7) = (1/m)*cosLU(psi)*cosLU(theta)*dfd_dv*dv_dvx;
-            A(7, 8) = (1/m)*cosLU(psi)*cosLU(theta)*dfd_dv*dv_dvy;
-            A(7, 9) = (1/m)*cosLU(psi)*cosLU(theta)*dfd_dv*dv_dvz;
+            A(7, 7) = (1/m)*cos(psi)*cos(theta)*dfd_dv*dv_dvx;
+            A(7, 8) = (1/m)*cos(psi)*cos(theta)*dfd_dv*dv_dvy;
+            A(7, 9) = (1/m)*cos(psi)*cos(theta)*dfd_dv*dv_dvz;
 
-            A(8, 0) = (1/m)*((cosLU(psi)*sinLU(theta)*-sinLU(phi) + sinLU(psi)*cosLU(phi))*force);
-            A(8, 1) = (1/m)*(sinLU(psi)*-sinLU(theta)*forceFunc + sinLU(psi)*cosLU(theta)*(dfd_dv*dv_dtheta + dfd_dw*dw_dtheta) + (sinLU(psi)*cosLU(theta)*cosLU(phi) - cosLU(psi)*sinLU(phi))*force);
-            A(8, 2) = (1/m)*(cosLU(psi)*cosLU(theta)*forceFunc + sinLU(psi)*cosLU(theta)*(dfd_dv*dv_dpsi + dfd_dw*dw_dpsi) + (cosLU(psi)*sinLU(theta)*cosLU(phi) + sinLU(psi)*sinLU(phi))*force);
-            A(8, 3) = (1/m)*sinLU(psi)*cosLU(theta)*dfd_dw*dw_dp;
-            A(8, 4) = (1/m)*sinLU(psi)*cosLU(theta)*dfd_dw*dw_dq;
-            A(8, 5) = (1/m)*sinLU(psi)*cosLU(theta)*dfd_dw*dw_dr;
+            A(8, 0) = (1/m)*((cos(psi)*sinLU[theta]*-sinLU[phi] + sinLU[psi]*cos(phi))*force);
+            A(8, 1) = (1/m)*(sinLU[psi]*-sinLU[theta]*forceFunc + sinLU[psi]*cos(theta)*(dfd_dv*dv_dtheta + dfd_dw*dw_dtheta) + (sinLU[psi]*cos(theta)*cos(phi) - cos(psi)*sinLU[phi])*force);
+            A(8, 2) = (1/m)*(cos(psi)*cos(theta)*forceFunc + sinLU[psi]*cos(theta)*(dfd_dv*dv_dpsi + dfd_dw*dw_dpsi) + (cos(psi)*sinLU[theta]*cos(phi) + sinLU[psi]*sinLU[phi])*force);
+            A(8, 3) = (1/m)*sinLU[psi]*cos(theta)*dfd_dw*dw_dp;
+            A(8, 4) = (1/m)*sinLU[psi]*cos(theta)*dfd_dw*dw_dq;
+            A(8, 5) = (1/m)*sinLU[psi]*cos(theta)*dfd_dw*dw_dr;
 
-            A(8, 7) = (1/m)*sinLU(psi)*cosLU(theta)*dfd_dv*dv_dvx;
-            A(8, 8) = (1/m)*sinLU(psi)*cosLU(theta)*dfd_dv*dv_dvy;
-            A(8, 9) = (1/m)*sinLU(psi)*cosLU(theta)*dfd_dv*dv_dvz;
+            A(8, 7) = (1/m)*sinLU[psi]*cos(theta)*dfd_dv*dv_dvx;
+            A(8, 8) = (1/m)*sinLU[psi]*cos(theta)*dfd_dv*dv_dvy;
+            A(8, 9) = (1/m)*sinLU[psi]*cos(theta)*dfd_dv*dv_dvz;
 
-            A(9, 0) = (1/m)*(cosLU(theta)*-sinLU(phi)*force);
-            A(9, 1) = (1/m)*(-cosLU(theta)*forceFunc + -sinLU(theta)*(dfd_dv*dv_dtheta + dfd_dw*dw_dtheta) - sinLU(theta)*cosLU(phi)*force);
-            A(9, 2) = (1/m)*(-sinLU(theta)*(dfd_dv*dv_dpsi + dfd_dw*dw_dpsi));
-            A(9, 3) = (1/m)*-sinLU(theta)*dfd_dw*dw_dp;
-            A(9, 4) = (1/m)*-sinLU(theta)*dfd_dw*dw_dq;
-            A(9, 5) = (1/m)*-sinLU(theta)*dfd_dw*dw_dr;
+            A(9, 0) = (1/m)*(cos(theta)*-sinLU[phi]*force);
+            A(9, 1) = (1/m)*(-cos(theta)*forceFunc + -sinLU[theta]*(dfd_dv*dv_dtheta + dfd_dw*dw_dtheta) - sinLU[theta]*cos(phi)*force);
+            A(9, 2) = (1/m)*(-sinLU[theta]*(dfd_dv*dv_dpsi + dfd_dw*dw_dpsi));
+            A(9, 3) = (1/m)*-sinLU[theta]*dfd_dw*dw_dp;
+            A(9, 4) = (1/m)*-sinLU[theta]*dfd_dw*dw_dq;
+            A(9, 5) = (1/m)*-sinLU[theta]*dfd_dw*dw_dr;
 
-            A(9, 7) = (1/m)*-sinLU(theta)*dfd_dv*dv_dvx;
-            A(9, 8) = (1/m)*-sinLU(theta)*dfd_dv*dv_dvy;
-            A(9, 9) = (1/m)*-sinLU(theta)*dfd_dv*dv_dvz;
+            A(9, 7) = (1/m)*-sinLU[theta]*dfd_dv*dv_dvx;
+            A(9, 8) = (1/m)*-sinLU[theta]*dfd_dv*dv_dvy;
+            A(9, 9) = (1/m)*-sinLU[theta]*dfd_dv*dv_dvz;
                                                                     // create a 10x10 identity matrix
             Matrix<float, 10, 10> IdentMatrix = Matrix<float, 10, 10>::Identity(10, 10);
 
@@ -499,7 +483,6 @@ int main(){
     // determines how accurate the algorithm as a whole is. 
 
     RobobeeEKF beeDataStructure;                                    // initialize RobobeeEKF object for use
-    initializeTables();                                             // initialize sine and cosine function look up table
 
     //MatrixXf csvDataMatrix  = loadDataMatrix("testCSV.csv");      // only for tesing purposes
     MatrixXf csvDataMatrix = loadDataMatrix("golden.csv");          // load all CSV data into a matrix for use
@@ -510,11 +493,16 @@ int main(){
 
                                                                     // estim traj -> Nx4 matrix
                                                                     // store all estimated values of where Robobee will be
+    auto now = chrono::duration_cast<chrono::microseconds>(chrono::system_clock::now().time_since_epoch()).count();
+
     Matrix<float, Dynamic, 4> estimated_trajectory = getEstimatedTrajectory(beeDataStructure, csvDataMatrix);
 
+    auto elapsed = chrono::duration_cast<chrono::microseconds>(chrono::system_clock::now().time_since_epoch()).count() - now;
                                                                     // traj error -> 1x4 matrix
                                                                     // find the error between known trajectory and estimated trajectory
     RowVector4f TrajectoryError = getRMSE(true_trajectory, estimated_trajectory);
+
+    cout << "time: " << elapsed << endl;
 
                                                                     // display the error values. These are percentages.
     cout << " errPitch     errRoll    errYaw   errAltitude: " << endl << TrajectoryError << endl;
